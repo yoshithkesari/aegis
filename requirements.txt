@@ -1,0 +1,17 @@
+# Deploy dependencies for Streamlit Community Cloud / Hugging Face Spaces.
+# Lean on purpose: the app runs fully on these. Heavier backends (mlflow,
+# langgraph, duckdb) are optional - the code falls back gracefully when absent
+# (filesystem registry, sequential orchestrator, in-memory metrics).
+# pyproject.toml remains the source of truth for the full dependency set.
+
+streamlit>=1.31.0
+plotly>=5.18.0
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# --- optional: uncomment to run the real backends in the cloud ---
+# mlflow>=2.10.0            # real champion/challenger registry
+# langgraph>=0.0.20         # real graph orchestrator (else sequential fallback)
+# duckdb>=0.9.0             # real metrics store (else in-memory)
+# google-generativeai>=0.3.0  # hosted Gemini reasoner (else local/heuristic)
