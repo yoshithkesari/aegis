@@ -72,14 +72,16 @@ class Controller:
         self.remediation = None
         self.investigator = None
         self.validator = None
-    
+        self.incident_store = None  # optional durable audit trail
+
     def set_dependencies(
         self,
         detectors,
         risk_gate,
         remediation,
         investigator,
-        validator
+        validator,
+        incident_store=None
     ):
         """Inject dependencies"""
         self.detectors = detectors
@@ -87,17 +89,36 @@ class Controller:
         self.remediation = remediation
         self.investigator = investigator
         self.validator = validator
-    
+        self.incident_store = incident_store
+
     def transition_to(self, new_state: IncidentState, reason: str = ""):
         """Transition to a new state"""
         old_state = self.current_state
         self.current_state = new_state
-        
+
         self.logger.info(f"State transition: {old_state.value} → {new_state.value} ({reason})")
-        
+
         if self.current_incident:
             self.current_incident.state = new_state
             self.current_incident.updated_at = datetime.utcnow().isoformat()
+            self._persist(old_state, new_state, reason)
+
+    def _persist(self, old_state, new_state, reason: str):
+        """Record the transition to the durable store (audit trail)."""
+        if not self.incident_store or not self.current_incident:
+            return
+        inc = self.current_incident
+        # validation_context can hold non-serialisable objects (DataFrames/arrays);
+        # persist a store-safe view without it.
+        payload = {k: v for k, v in inc.__dict__.items() if k != "validation_context"}
+        try:
+            self.incident_store.save(payload)
+            self.incident_store.record_event(
+                inc.incident_id, inc.updated_at, "controller",
+                old_state.value, new_state.value, reason,
+            )
+        except Exception as exc:  # persistence must never break the control loop
+            self.logger.warning(f"incident store persist failed: {exc}")
     
     def handle_drift_detected(self, drift_result: Dict[str, Any]) -> Incident:
         """Handle drift detection - open incident"""
