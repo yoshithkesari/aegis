@@ -179,6 +179,43 @@ def run_incident(system: System, severity: str = "medium") -> Dict[str, Any]:
     }
 
 
+def demo_run(seed: int = 1) -> Dict[str, Any]:
+    """Run the full narrative on real components; return everything a UI needs.
+
+    Computes the *true* (label-computed) champion and challenger accuracy on the
+    drifted window - which the live gate never sees - so a demo can show the
+    label-free estimate against ground truth.
+    """
+    system = build_system(seed=seed)
+    champion = system.remediation.champion            # capture before promotion
+    rx, ry = system.remediation.recent_X, system.remediation.recent_y
+    champion_acc = float((champion.predict(rx) == ry).mean())
+
+    healthy = run_stream(system, drifted=False)       # no false interventions
+    drift = run_stream(system, drifted=True)          # auto-opens + resolves
+
+    inc = system.controller.incident_history[-1]
+    challenger = system.remediation._challenger
+    challenger_acc = (
+        float((challenger.predict(rx) == ry).mean()) if challenger is not None else None
+    )
+    champ = system.registry.get_champion()
+    return {
+        "incident_id": inc.incident_id,
+        "diagnosis": inc.diagnosis,
+        "root_cause": inc.root_cause,
+        "severity": (drift["detections"][0] if drift["detections"] else None),
+        "gate": inc.validation_result or {},
+        "champion_acc": champion_acc,        # true, before remediation
+        "challenger_acc": challenger_acc,    # true, after remediation
+        "healthy_incidents": healthy["incidents_opened"],
+        "drift_incidents": drift["incidents_opened"],
+        "final_state": drift["final_state"],
+        "champion_version": champ.version if champ else None,
+        "audit_trail": system.incident_store.audit_trail(inc.incident_id),
+    }
+
+
 def main():  # pragma: no cover - CLI entrypoint
     system = build_system()
 

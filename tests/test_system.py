@@ -5,7 +5,20 @@ loop and leaves a durable audit trail.
 
 import tempfile
 
-from aegis.system import build_system, run_incident
+from aegis.system import build_system, demo_run, run_incident
+
+
+def test_demo_run_produces_real_recovery_payload():
+    d = demo_run()
+    # healthy stream is quiet; drift auto-opens exactly one incident that resolves
+    assert d["healthy_incidents"] == 0
+    assert d["drift_incidents"] == 1
+    assert d["final_state"] == "healthy"
+    # label-free gate promoted, and the challenger really did recover accuracy
+    assert d["gate"]["passed"] is True
+    assert d["challenger_acc"] >= d["champion_acc"]
+    assert d["severity"] == "medium"
+    assert len(d["audit_trail"]) >= 7
 
 
 def test_full_incident_closes_the_loop_and_persists_audit_trail():
