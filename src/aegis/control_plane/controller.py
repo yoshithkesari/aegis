@@ -43,6 +43,9 @@ class Incident:
     retrain_job_id: Optional[str] = None
     validation_result: Optional[Dict[str, Any]] = None
     canary_metrics: Optional[Dict[str, Any]] = None
+    # challenger evidence the retrain step attaches for the label-free gate:
+    # {"challenger_proba": array, "baseline": float, "reference": DataFrame}
+    validation_context: Optional[Dict[str, Any]] = None
 
 
 class Controller:
