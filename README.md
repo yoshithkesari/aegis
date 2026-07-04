@@ -43,7 +43,7 @@ Two loops — and only one of them is agentic.
 | Monitored model | XGBoost / scikit-learn | Trivial on purpose — it's the patient, not the product | $0 |
 | Data / feature drift | Evidently | PSI, KS, Wasserstein, JS-divergence, reports | $0 |
 | Streaming / concept drift | River | ADWIN, DDM, Page-Hinkley — real online detectors | $0 |
-| Label-free validation | NannyML | CBPE / DLE — the hero; validates without labels | $0 |
+| Label-free validation | CBPE / DLE (built-in) | The hero; expected-confusion-matrix estimator, NannyML-compatible, runs on any Python | $0 |
 | Drift attribution | SHAP | Per-feature contribution for root cause | $0 |
 | Registry / champion-challenger | MLflow | Versioning, stage transitions, rollback | $0 |
 | Orchestration | LangGraph | Models both the state machine and the agent sub-loop | $0* |
