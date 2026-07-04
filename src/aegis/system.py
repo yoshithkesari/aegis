@@ -101,8 +101,12 @@ class System:
 
 
 def build_system(workdir: Optional[str] = None, seed: int = 1,
-                 drift_scale: float = 1.1) -> System:
-    """Assemble a fully-wired, real (offline) AEGIS system."""
+                 drift_scale: float = 1.1, use_graph: bool = False) -> System:
+    """Assemble a fully-wired, real (offline) AEGIS system.
+
+    use_graph=True routes incidents through the LangGraph orchestrator instead
+    of the controller's autopilot chaining (same outcomes, graph-sequenced).
+    """
     workdir = workdir or tempfile.mkdtemp(prefix="aegis_")
 
     # --- data: one world split into reference + recent, then drift the recent ---
@@ -148,7 +152,8 @@ def build_system(workdir: Optional[str] = None, seed: int = 1,
         validator=DeployGate(),                                   # real CBPE gate
         incident_store=incident_store,
     )
-    monitor = StreamMonitor(controller, reference_features, detector=detector)
+    monitor = StreamMonitor(controller, reference_features, detector=detector,
+                            use_graph=use_graph)
     return System(controller, registry, incident_store, remediation,
                   monitor, healthy_stream, drift_stream)
 

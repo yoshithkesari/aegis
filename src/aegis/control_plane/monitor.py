@@ -46,6 +46,7 @@ class StreamMonitor:
         detector: Optional[DetectorSuite] = None,
         threshold: Optional[float] = None,
         min_severity: DriftSeverity = DriftSeverity.MEDIUM,
+        use_graph: bool = False,
     ):
         self.controller = controller
         self.reference = reference_features
@@ -54,8 +55,18 @@ class StreamMonitor:
         # Bonferroni correction across the features we test each batch.
         self.threshold = threshold if threshold is not None else 0.05 / n_features
         self.min_severity = min_severity
+        # When True, incidents are sequenced by the LangGraph orchestrator
+        # instead of the controller's own autopilot chaining.
+        self.use_graph = use_graph
         self.batches_seen = 0
         self.incidents_opened = 0
+
+    def _open_incident(self, drift: dict) -> None:
+        if self.use_graph:
+            from ..orchestration import run_incident_via_graph
+            run_incident_via_graph(self.controller, drift)
+        else:
+            self.controller.handle_drift_detected(drift)
 
     def process_batch(self, batch: pd.DataFrame) -> Optional[DriftDetectionResult]:
         """Run drift detection on one batch; open an incident if warranted."""
@@ -71,7 +82,7 @@ class StreamMonitor:
         if (result.drift_detected and severe_enough
                 and self.controller.current_state is IncidentState.HEALTHY):
             self.incidents_opened += 1
-            self.controller.handle_drift_detected({
+            self._open_incident({
                 "drift_type": result.drift_type,
                 "severity": result.severity.value,
                 "summary": result.summary,

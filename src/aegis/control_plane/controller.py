@@ -65,6 +65,11 @@ class Controller:
         self.current_incident: Optional[Incident] = None
         self.incident_history: list = []
         self._incident_seq = 0  # guarantees unique ids under sub-second creation
+        # autopilot=True: each stage chains into the next (controller self-drives).
+        # autopilot=False: each stage performs one transition and stops, so an
+        # external orchestrator (the LangGraph graph) sequences the stages.
+        self.autopilot = True
+        self._pending_shadow_hold = False
         self.logger = logging.getLogger(f"Controller.{model_id}")
         
         # Dependencies (injected)
@@ -142,10 +147,11 @@ class Controller:
         self.current_incident = incident
         self.incident_history.append(incident)
         self.transition_to(IncidentState.DRIFT_SUSPECTED, f"Drift detected: {drift_result.get('summary', '')}")
-        
-        # Move to investigation
-        self.start_investigation()
-        
+
+        # Move to investigation (unless an external orchestrator drives the stages)
+        if self.autopilot:
+            self.start_investigation()
+
         return incident
     
     def start_investigation(self):
@@ -164,9 +170,10 @@ class Controller:
             self.current_incident.recommended_action = diagnosis.recommended_action
 
             self.transition_to(IncidentState.DIAGNOSED, f"Investigation complete: {diagnosis.root_cause or 'unknown'}")
-            
+
             # Move to risk gate decision
-            self.evaluate_risk_gate()
+            if self.autopilot:
+                self.evaluate_risk_gate()
     
     def evaluate_risk_gate(self):
         """Evaluate risk gate for autonomous decision"""
@@ -193,7 +200,11 @@ class Controller:
         elif decision.action.value == "block":
             self.transition_to(IncidentState.ROLLED_BACK, f"Risk gate block: {decision.reason}")
         elif "retrain" in decision.action.value:
-            self.start_retraining(decision.action.value == "auto_retrain_shadow_hold")
+            # remember the shadow-hold decision so a step-driven orchestrator can
+            # pass it on to retrain/validate without re-deciding.
+            self._pending_shadow_hold = decision.action.value == "auto_retrain_shadow_hold"
+            if self.autopilot:
+                self.start_retraining(self._pending_shadow_hold)
         else:
             self.transition_to(IncidentState.HEALTHY, f"Risk gate: {decision.action.value}")
     
@@ -213,7 +224,8 @@ class Controller:
             if retrain_result.get("success"):
                 # start_validation guards on RETRAINING and performs the
                 # transition itself - don't pre-transition here or it no-ops.
-                self.start_validation(shadow_hold)
+                if self.autopilot:
+                    self.start_validation(shadow_hold)
             else:
                 self.transition_to(IncidentState.ESCALATED, f"Retraining failed: {retrain_result.get('error')}")
     
@@ -236,7 +248,7 @@ class Controller:
             if validation_result.get("passed"):
                 if shadow_hold:
                     self.transition_to(IncidentState.HEALTHY, "Validation passed - shadow hold until labels confirm")
-                else:
+                elif self.autopilot:
                     self.start_canary()
             else:
                 self.transition_to(IncidentState.ROLLED_BACK, f"Validation failed: {validation_result.get('reason')}")
@@ -257,7 +269,8 @@ class Controller:
             if canary_result.get("success"):
                 # promote_challenger guards on CANARY and performs the
                 # PROMOTED transition itself - don't pre-transition here.
-                self.promote_challenger()
+                if self.autopilot:
+                    self.promote_challenger()
             else:
                 self.transition_to(IncidentState.ROLLED_BACK, f"Canary failed: {canary_result.get('error')}")
     
