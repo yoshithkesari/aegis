@@ -18,6 +18,9 @@ def test_demo_run_produces_real_recovery_payload():
     assert d["gate"]["passed"] is True
     assert d["challenger_acc"] >= d["champion_acc"]
     assert d["severity"] == "medium"
+    # dramatic-but-real before/after: drift degrades the champion, AEGIS recovers
+    assert d["champion_healthy_acc"] > d["champion_drift_acc"] + 0.15
+    assert d["recovery"] > 0.15
     assert len(d["audit_trail"]) >= 7
 
 

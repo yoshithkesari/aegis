@@ -36,6 +36,10 @@ from .stores import IncidentStore, ModelRegistry
 from .validation import DeployGate
 
 FEATURE_COLS = [f"f{i}" for i in range(12)]
+# How hard to push the two highest-weight features against the champion's
+# decision boundary. Tuned so the champion degrades to ~0.67 (a believable
+# "degraded", not random) while only two features move (MEDIUM severity).
+DRIFT_DELTA = -1.4
 
 MODEL_ID = "fraud-classifier"
 
@@ -116,17 +120,21 @@ def build_system(workdir: Optional[str] = None, seed: int = 1,
     reference_df = pd.DataFrame(
         {"proba": champion.predict_proba(Xr)[:, 1], "is_fraud": yr}
     )
-    rng = np.random.RandomState(seed + 3)
-    recent_X = Xp + rng.normal(0, drift_scale, Xp.shape)  # covariate drift
-    recent_y = yp
+    # Drift the two highest-weight features against the champion's boundary, so
+    # the champion genuinely degrades (real "before") while only two features
+    # move (MEDIUM severity -> auto-remediate). A challenger retrained on the
+    # drifted window recovers (real "after").
+    w = champion.coef_[0]
+    top2 = np.argsort(np.abs(w))[::-1][:2]
+    Xd = Xp.copy()
+    for f in top2:
+        Xd[:, f] += DRIFT_DELTA * np.sign(w[f])
+    recent_X, recent_y = Xd, yp
 
     # Feature-only frames for the stream monitor / detector.
     reference_features = pd.DataFrame(Xr, columns=FEATURE_COLS)
-    healthy_stream = pd.DataFrame(Xp, columns=FEATURE_COLS)  # same dist as reference
-    # Drift two features -> a small set flagged -> MEDIUM severity (auto-remediate).
-    drifted = Xp.copy()
-    drifted[:, :2] += 3.0
-    drift_stream = pd.DataFrame(drifted, columns=FEATURE_COLS)
+    healthy_stream = pd.DataFrame(Xp, columns=FEATURE_COLS)   # same dist as reference
+    drift_stream = pd.DataFrame(Xd, columns=FEATURE_COLS)     # degrades the champion
 
     # --- stores ---
     registry = ModelRegistry(os.path.join(workdir, "mlruns"))
@@ -194,7 +202,8 @@ def demo_run(seed: int = 1) -> Dict[str, Any]:
     system = build_system(seed=seed)
     champion = system.remediation.champion            # capture before promotion
     rx, ry = system.remediation.recent_X, system.remediation.recent_y
-    champion_acc = float((champion.predict(rx) == ry).mean())
+    champion_healthy_acc = float((champion.predict(system.healthy_stream.values) == ry).mean())
+    champion_drift_acc = float((champion.predict(rx) == ry).mean())   # the "before"
 
     healthy = run_stream(system, drifted=False)       # no false interventions
     drift = run_stream(system, drifted=True)          # auto-opens + resolves
@@ -211,8 +220,11 @@ def demo_run(seed: int = 1) -> Dict[str, Any]:
         "root_cause": inc.root_cause,
         "severity": (drift["detections"][0] if drift["detections"] else None),
         "gate": inc.validation_result or {},
-        "champion_acc": champion_acc,        # true, before remediation
-        "challenger_acc": challenger_acc,    # true, after remediation
+        "champion_healthy_acc": champion_healthy_acc,   # before drift
+        "champion_drift_acc": champion_drift_acc,       # incumbent stops here
+        "champion_acc": champion_drift_acc,             # alias (degraded baseline)
+        "challenger_acc": challenger_acc,               # AEGIS recovered
+        "recovery": (challenger_acc - champion_drift_acc) if challenger_acc else 0.0,
         "healthy_incidents": healthy["incidents_opened"],
         "drift_incidents": drift["incidents_opened"],
         "final_state": drift["final_state"],

@@ -129,6 +129,10 @@ if 'model_health' not in st.session_state:
     st.session_state.model_health = "Healthy"
 if 'accuracy' not in st.session_state:
     st.session_state.accuracy = 0.91
+if 'drift_acc' not in st.session_state:      # incumbent stays stuck here
+    st.session_state.drift_acc = 0.91
+if 'recovered_acc' not in st.session_state:  # AEGIS recovers to here
+    st.session_state.recovered_acc = 0.91
 if 'incident_count' not in st.session_state:
     st.session_state.incident_count = 0
 if 'loss_counter' not in st.session_state:
@@ -169,24 +173,25 @@ def render_incumbent_panel():
     with col2:
         st.metric(
             "Accuracy",
-            f"{st.session_state.accuracy:.3f}",
-            delta=f"{st.session_state.accuracy - 0.91:.3f}"
+            f"{st.session_state.drift_acc:.3f}",
+            delta=f"{st.session_state.drift_acc - 0.91:.3f}",
+            delta_color="inverse",
         )
-    
+
     with col3:
         st.metric(
             "Loss Counter",
             f"${st.session_state.loss_counter:,.0f}",
             delta=None
         )
-    
+
     st.markdown("#### Recent Alerts")
-    
+
     if st.session_state.model_health == "Drift Detected":
-        st.markdown("""
+        st.markdown(f"""
         <div class="incident-card">
             <strong>⚠️ DRIFT DETECTED</strong><br>
-            <span style="color: var(--text-secondary);">Performance dropped from 0.91 to 0.67</span><br>
+            <span style="color: var(--text-secondary);">Performance dropped from 0.91 to {st.session_state.drift_acc:.2f}</span><br>
             <span style="color: var(--text-secondary); font-size: 0.9rem;">...and then nothing happens. A human gets paged. $$ bleeds while you wait.</span>
         </div>
         """, unsafe_allow_html=True)
@@ -241,7 +246,7 @@ def render_aegis_panel():
         st.markdown(f"""
         <div style="text-align: center;">
             <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Accuracy</div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">{st.session_state.accuracy:.3f}</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success-color);">{st.session_state.recovered_acc:.3f}</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -443,26 +448,46 @@ def render_live_incident():
 
     gate = d["gate"]
     passed = gate.get("passed")
+    healthy_acc = d["champion_healthy_acc"]
+    before = d["champion_drift_acc"]
+    after = d["challenger_acc"]
+
+    # What's special: the before/after that no incumbent delivers.
+    st.markdown(f"""
+    <div style="display:flex;gap:1rem;margin-bottom:1rem">
+      <div style="flex:1;background:#fef2f2;border:1px solid #fecaca;border-radius:0.5rem;padding:1rem">
+        <div style="font-weight:700;color:#991b1b">BEFORE · Incumbents (Arize / WhyLabs / Fiddler)</div>
+        <div style="color:#7f1d1d;font-size:0.9rem;margin-top:0.25rem">
+          Detect the drift, fire an alert, and <b>stop</b>. The model sits at
+          <b>{before:.3f}</b> while a human is paged and losses accrue.
+        </div>
+      </div>
+      <div style="flex:1;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:0.5rem;padding:1rem">
+        <div style="font-weight:700;color:#065f46">AFTER · AEGIS</div>
+        <div style="color:#064e3b;font-size:0.9rem;margin-top:0.25rem">
+          Detects → investigates → retrains → <b>validates without labels</b> →
+          promotes. Recovers to <b>{after:.3f}</b> autonomously, in one incident.
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Champion (drifted)", f"{d['champion_acc']:.3f}")
+        st.metric("Healthy baseline", f"{healthy_acc:.3f}")
     with c2:
-        delta = None
-        if d["challenger_acc"] is not None:
-            delta = f"{d['challenger_acc'] - d['champion_acc']:+.3f}"
-        st.metric("Challenger (recovered)",
-                  f"{d['challenger_acc']:.3f}" if d['challenger_acc'] else "—",
-                  delta=delta)
+        st.metric("Under drift · incumbent STOPS", f"{before:.3f}",
+                  delta=f"{before - healthy_acc:+.3f}", delta_color="inverse")
     with c3:
-        st.metric("CBPE gate est (no labels)", f"{gate.get('estimated_performance', 0):.3f}",
-                  delta=f"{gate.get('improvement', 0):+.3f}")
+        st.metric("AEGIS auto-recovered", f"{after:.3f}" if after else "—",
+                  delta=f"{after - before:+.3f}" if after else None)
     with c4:
         st.markdown(
-            f"<div style='text-align:center'><div class='scoreboard-label'>Decision</div>"
+            f"<div style='text-align:center'><div class='scoreboard-label'>Deploy gate · no labels</div>"
             f"<div class='scoreboard-value' style='color:{'#10b981' if passed else '#ef4444'}'>"
             f"{'PROMOTE' if passed else 'HOLD'}</div>"
-            f"<div class='scoreboard-label'>{gate.get('confidence','')} confidence</div></div>",
+            f"<div class='scoreboard-label'>CBPE est {gate.get('estimated_performance',0):.3f} · "
+            f"{gate.get('confidence','')} conf</div></div>",
             unsafe_allow_html=True,
         )
 
@@ -493,32 +518,16 @@ def render_live_incident():
 
 
 def run_demo():
-    """Run the three-act demo"""
+    """Run the demo on real numbers from the live system."""
+    d = _live_demo()  # real before/after from aegis.system
     st.session_state.demo_running = True
-    
-    # Act 1: Problem
-    st.session_state.current_act = 1
-    st.session_state.model_health = "Drift Detected"
-    st.session_state.accuracy = 0.67
-    st.session_state.loss_counter = 15000
-    
-    st.rerun()
-    
-    time.sleep(2)
-    
-    # Act 2: Solution
-    st.session_state.current_act = 2
-    st.session_state.incident_count = 4
-    st.session_state.accuracy = 0.89
-    st.session_state.mttr = 42
-    
-    st.rerun()
-    
-    time.sleep(2)
-    
-    # Act 3: Proof
     st.session_state.current_act = 3
-    
+    st.session_state.model_health = "Drift Detected"
+    st.session_state.drift_acc = d["champion_drift_acc"]        # incumbent stuck
+    st.session_state.recovered_acc = d["challenger_acc"]        # AEGIS recovered
+    st.session_state.accuracy = d["challenger_acc"]
+    st.session_state.incident_count = d["drift_incidents"]
+    st.session_state.loss_counter = 0
     st.rerun()
 
 
@@ -528,10 +537,12 @@ def reset_demo():
     st.session_state.current_act = 0
     st.session_state.model_health = "Healthy"
     st.session_state.accuracy = 0.91
+    st.session_state.drift_acc = 0.91
+    st.session_state.recovered_acc = 0.91
     st.session_state.incident_count = 0
     st.session_state.loss_counter = 0
     st.session_state.mttr = 0
-    
+
     st.rerun()
 
 
