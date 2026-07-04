@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegis-ml-reliability"
+version = "1.0.0"
+description = "AEGIS - Autonomous Model Reliability Engineer (an on-call SRE for production ML models)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "AEGIS Team" }]
+
+# Core runtime deps. Everything here is free / open-source.
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "xgboost>=2.0.0",
+    "evidently>=0.4.0",        # data / feature drift
+    "river>=0.21.0",           # streaming / concept drift
+    "shap>=0.43.0",            # drift attribution
+    "mlflow>=2.10.0",          # champion/challenger registry
+    "langgraph>=0.0.20",       # orchestration (do NOT enable LangSmith)
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.0.0",
+    "streamlit>=1.31.0",
+    "duckdb>=0.9.0",           # metrics store
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "joblib>=1.3.0",
+]
+
+[project.optional-dependencies]
+# Label-free validation. NannyML requires Python <3.13; install when supported.
+labelfree = ["nannyml>=0.13.0"]
+# Hosted free-tier reasoner.
+hosted = ["google-generativeai>=0.3.0"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+
+[project.scripts]
+aegis-ui = "aegis.ui.streamlit_app:main"
+aegis-server = "aegis.data_plane.serving:create_app"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
