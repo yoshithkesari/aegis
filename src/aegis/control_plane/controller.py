@@ -64,6 +64,7 @@ class Controller:
         self.current_state = IncidentState.HEALTHY
         self.current_incident: Optional[Incident] = None
         self.incident_history: list = []
+        self._incident_seq = 0  # guarantees unique ids under sub-second creation
         self.logger = logging.getLogger(f"Controller.{model_id}")
         
         # Dependencies (injected)
@@ -126,9 +127,10 @@ class Controller:
             self.logger.warning(f"Ignoring drift detection - not in HEALTHY state (current: {self.current_state.value})")
             return self.current_incident
         
-        # Create new incident
+        # Create new incident (seq suffix keeps ids unique within one second)
+        self._incident_seq += 1
         incident = Incident(
-            incident_id=f"inc_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            incident_id=f"inc_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{self._incident_seq:04d}",
             model_id=self.model_id,
             state=IncidentState.DRIFT_SUSPECTED,
             created_at=datetime.utcnow().isoformat(),

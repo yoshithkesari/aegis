@@ -243,11 +243,12 @@ class DetectorSuite:
     def detect_batch_drift(
         self,
         reference_data: pd.DataFrame,
-        current_data: pd.DataFrame
+        current_data: pd.DataFrame,
+        threshold: float = 0.05
     ) -> DriftDetectionResult:
         """Detect batch data drift"""
         self.evidently_detector.set_reference(reference_data)
-        return self.evidently_detector.detect_drift(current_data)
+        return self.evidently_detector.detect_drift(current_data, threshold=threshold)
     
     def detect_concept_drift(self, performance: float) -> Optional[DriftDetectionResult]:
         """Detect concept drift"""

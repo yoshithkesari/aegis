@@ -27,10 +27,15 @@ from sklearn.linear_model import LogisticRegression
 
 from .agent.investigator import Investigator
 from .control_plane.controller import Controller
+from .control_plane.detectors import DetectorSuite
+from .control_plane.monitor import StreamMonitor
 from .control_plane.risk_gate import RiskGate
+from .data_plane.replayer import StreamReplayer
 from .reasoning.local import HeuristicReasoner
 from .stores import IncidentStore, ModelRegistry
 from .validation import DeployGate
+
+FEATURE_COLS = [f"f{i}" for i in range(12)]
 
 MODEL_ID = "fraud-classifier"
 
@@ -90,6 +95,9 @@ class System:
     registry: ModelRegistry
     incident_store: IncidentStore
     remediation: RegistryRemediation
+    monitor: StreamMonitor
+    healthy_stream: pd.DataFrame
+    drift_stream: pd.DataFrame
 
 
 def build_system(workdir: Optional[str] = None, seed: int = 1,
@@ -108,6 +116,14 @@ def build_system(workdir: Optional[str] = None, seed: int = 1,
     recent_X = Xp + rng.normal(0, drift_scale, Xp.shape)  # covariate drift
     recent_y = yp
 
+    # Feature-only frames for the stream monitor / detector.
+    reference_features = pd.DataFrame(Xr, columns=FEATURE_COLS)
+    healthy_stream = pd.DataFrame(Xp, columns=FEATURE_COLS)  # same dist as reference
+    # Drift two features -> a small set flagged -> MEDIUM severity (auto-remediate).
+    drifted = Xp.copy()
+    drifted[:, :2] += 3.0
+    drift_stream = pd.DataFrame(drifted, columns=FEATURE_COLS)
+
     # --- stores ---
     registry = ModelRegistry(os.path.join(workdir, "mlruns"))
     incident_store = IncidentStore(os.path.join(workdir, "incidents.db"))
@@ -122,16 +138,26 @@ def build_system(workdir: Optional[str] = None, seed: int = 1,
         registry, workdir, recent_X, recent_y, reference_df, champion
     )
 
+    detector = DetectorSuite()
     controller = Controller(model_id=MODEL_ID)
     controller.set_dependencies(
-        detectors=None,
+        detectors=detector,
         risk_gate=RiskGate(),
         remediation=remediation,
         investigator=Investigator(reasoner=HeuristicReasoner()),  # offline
         validator=DeployGate(),                                   # real CBPE gate
         incident_store=incident_store,
     )
-    return System(controller, registry, incident_store, remediation)
+    monitor = StreamMonitor(controller, reference_features, detector=detector)
+    return System(controller, registry, incident_store, remediation,
+                  monitor, healthy_stream, drift_stream)
+
+
+def run_stream(system: System, drifted: bool = True, batch_size: int = 200) -> Dict[str, Any]:
+    """Replay a stream through the monitor; drift auto-opens an incident."""
+    stream = system.drift_stream if drifted else system.healthy_stream
+    replayer = StreamReplayer(stream, batch_size=batch_size)
+    return system.monitor.run(replayer)
 
 
 def run_incident(system: System, severity: str = "medium") -> Dict[str, Any]:
@@ -155,9 +181,31 @@ def run_incident(system: System, severity: str = "medium") -> Dict[str, Any]:
 
 def main():  # pragma: no cover - CLI entrypoint
     system = build_system()
-    result = run_incident(system, severity="medium")
+
+    # 1) healthy stream -> detector stays quiet, no incident opened
+    healthy = run_stream(system, drifted=False)
+    print(f"[stream] healthy: {healthy['batches_seen']} batches, "
+          f"{healthy['incidents_opened']} incidents opened")
+
+    # 2) drifted stream -> detector auto-opens an incident, loop runs
+    drifted = run_stream(system, drifted=True)
+    print(f"[stream] drifted: {drifted['incidents_opened']} incident(s) auto-opened, "
+          f"severities={drifted['detections'][:1]}, final state={drifted['final_state']}")
+
+    inc_id = system.controller.incident_history[-1].incident_id
+    trail = system.incident_store.audit_trail(inc_id)
+    champ = system.registry.get_champion()
+    result = {
+        "incident_id": inc_id,
+        "diagnosis": system.controller.incident_history[-1].diagnosis,
+        "root_cause": system.controller.incident_history[-1].root_cause,
+        "gate": system.controller.incident_history[-1].validation_result,
+        "final_state": drifted["final_state"],
+        "champion_version": champ.version if champ else None,
+        "audit_trail": trail,
+    }
     print("=" * 64)
-    print(f"AEGIS incident {result['incident_id']}")
+    print(f"AEGIS incident {result['incident_id']}  (auto-opened from stream)")
     print("=" * 64)
     print(f"diagnosis     : {result['diagnosis']}")
     print(f"root cause    : {result['root_cause']}")
