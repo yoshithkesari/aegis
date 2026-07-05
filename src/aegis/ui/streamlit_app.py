@@ -116,6 +116,29 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
+
+    /* --- Night-mode-proof: force readable dark text on white regardless of the
+       viewer's Streamlit theme (light / dark / system). Custom HTML blocks set
+       their own explicit colors on the element, so they are unaffected. --- */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+    .main .block-container { background-color: #ffffff !important; }
+    [data-testid="stHeader"], [data-testid="stToolbar"] { background: transparent !important; }
+
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    [data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3, [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
+    [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"],
+    [data-testid="stMetricLabel"] p,
+    [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
+    [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p,
+    .stRadio label, .stRadio label p, [role="radiogroup"] label,
+    [data-baseweb="tab"] {
+        color: #1e293b !important;
+    }
+    /* markdown links and emphasis stay legible too */
+    [data-testid="stMarkdownContainer"] a { color: #2563eb !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,6 +231,31 @@ ANALYSIS_2 = {
     "rca_accuracy": "87%",
     "audit_trail": _lifecycle_trail("concept drift in segment=small_business"),
 }
+
+
+def _html_table(rows):
+    """Theme-proof HTML table with explicit colors (visible in any theme)."""
+    if not rows:
+        return ""
+    cols = list(rows[0].keys())
+    head = "".join(
+        f"<th style='text-align:left;padding:8px 12px;border-bottom:2px solid "
+        f"#e2e8f0;color:#475569;font-size:0.8rem;font-weight:600'>{c}</th>"
+        for c in cols
+    )
+    body = ""
+    for r in rows:
+        tds = "".join(
+            f"<td style='padding:8px 12px;border-bottom:1px solid #eef2f7;"
+            f"color:#1e293b'>{r[c]}</td>"
+            for c in cols
+        )
+        body += f"<tr>{tds}</tr>"
+    return (
+        "<table style='width:100%;border-collapse:collapse;background:#ffffff;"
+        f"border:1px solid #e2e8f0;border-radius:6px'><thead><tr>{head}</tr>"
+        f"</thead><tbody>{body}</tbody></table>"
+    )
 
 
 def render_header():
@@ -478,7 +526,7 @@ def render_hero_technique():
         st.info(f"Live scenario unavailable ({exc}).")
         return
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.markdown(_html_table(rows), unsafe_allow_html=True)
 
     passed = gate["passed"]
     c1, c2, c3 = st.columns(3)
