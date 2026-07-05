@@ -134,11 +134,25 @@ st.markdown("""
     [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p,
     [data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p,
     .stRadio label, .stRadio label p, [role="radiogroup"] label,
-    [data-baseweb="tab"] {
+    [data-baseweb="tab"],
+    [data-testid="stExpander"] summary, [data-testid="stExpander"] p,
+    [data-testid="stAlert"], [data-testid="stAlert"] p {
         color: #1e293b !important;
     }
     /* markdown links and emphasis stay legible too */
     [data-testid="stMarkdownContainer"] a { color: #2563eb !important; }
+    /* secondary button (Reset): dark text on a light surface */
+    .stButton > button {
+        color: #1e293b !important;
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+    }
+    /* primary button (Run Demo) stays white text on the accent fill */
+    .stButton > button[kind="primary"] {
+        color: #ffffff !important;
+        background-color: #2563eb !important;
+        border-color: #2563eb !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
