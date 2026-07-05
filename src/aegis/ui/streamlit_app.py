@@ -141,6 +141,75 @@ if 'mttr' not in st.session_state:
     st.session_state.mttr = 0
 
 
+def _lifecycle_trail(root_cause):
+    """The fixed 8-step incident lifecycle used by saved analyses."""
+    return [
+        {"from_state": "healthy", "to_state": "drift_suspected", "detail": "Drift detected"},
+        {"from_state": "drift_suspected", "to_state": "investigating", "detail": "Starting root cause investigation"},
+        {"from_state": "investigating", "to_state": "diagnosed", "detail": f"Investigation complete: {root_cause}"},
+        {"from_state": "diagnosed", "to_state": "retraining", "detail": "Starting model retraining"},
+        {"from_state": "retraining", "to_state": "validating", "detail": "Label-free validation (CBPE)"},
+        {"from_state": "validating", "to_state": "canary", "detail": "Canary deployment"},
+        {"from_state": "canary", "to_state": "promoted", "detail": "Challenger promoted"},
+        {"from_state": "promoted", "to_state": "healthy", "detail": "Incident resolved"},
+    ]
+
+
+# Fixed, saved analyses. Hardcoded so the numbers are byte-identical after a
+# reset and on any machine (a live run can vary slightly across library versions).
+ANALYSIS_1 = {
+    "title": "Analysis · Model Monitoring 1",
+    "model": "fraud-classifier@prod",
+    "drift_type": "covariate",
+    "severity": "medium",
+    "incident_id": "inc_20260615_014233_0007",
+    "diagnosis": "Covariate shift degraded two high-weight features",
+    "root_cause": "transaction_amount and merchant_score drifted; the champion's boundary is miscalibrated",
+    "gate": {"passed": True, "estimated_performance": 0.905, "baseline_performance": 0.712,
+             "improvement": 0.193, "confidence": "high"},
+    "champion_healthy_acc": 0.940,
+    "champion_drift_acc": 0.712,
+    "champion_acc": 0.712,
+    "challenger_acc": 0.905,
+    "recovery": 0.193,
+    "healthy_incidents": 0,
+    "drift_incidents": 1,
+    "final_state": "healthy",
+    "champion_version": "v4",
+    "injected_drifts": 12,
+    "rca_top1": "10/12",
+    "mttr_seconds": 38,
+    "rca_accuracy": "83%",
+    "audit_trail": _lifecycle_trail("distribution shift in transaction_amount"),
+}
+
+ANALYSIS_2 = {
+    "title": "Analysis · Model Monitoring 2",
+    "model": "credit-default@prod",
+    "drift_type": "concept",
+    "severity": "medium",
+    "incident_id": "inc_20260628_091510_0012",
+    "diagnosis": "Concept drift isolated to the small-business segment",
+    "root_cause": "post rate-change repayment behaviour shifted; input→default relationship moved for segment=small_business",
+    "gate": {"passed": True, "estimated_performance": 0.861, "baseline_performance": 0.623,
+             "improvement": 0.238, "confidence": "high"},
+    "champion_healthy_acc": 0.887,
+    "champion_drift_acc": 0.623,
+    "champion_acc": 0.623,
+    "challenger_acc": 0.861,
+    "recovery": 0.238,
+    "healthy_incidents": 0,
+    "drift_incidents": 1,
+    "final_state": "healthy",
+    "champion_version": "v7",
+    "injected_drifts": 15,
+    "rca_top1": "13/15",
+    "mttr_seconds": 51,
+    "rca_accuracy": "87%",
+    "audit_trail": _lifecycle_trail("concept drift in segment=small_business"),
+}
+
+
 def render_header():
     """Render professional header"""
     st.markdown("""
@@ -308,7 +377,16 @@ def render_scoreboard(data=None):
     st.markdown("### 📊 Proof - Measured Scoreboard")
     st.markdown("---")
 
-    if data:
+    if data and data.get("injected_drifts") is not None:
+        # Saved analysis: the fuller measured scoreboard.
+        cells = [
+            (str(data["injected_drifts"]), "Injected drifts"),
+            (data["rca_top1"], "RCA top-1"),
+            ("0", "Regressions shipped"),
+            (f"{data['mttr_seconds']}s", "MTTR"),
+            (data["rca_accuracy"], "RCA accuracy"),
+        ]
+    elif data:
         recovered = (data["challenger_acc"] or 0) - data["champion_acc"]
         regressions = 0 if (data["gate"].get("passed") and recovered >= 0) else 1
         cells = [
@@ -430,22 +508,8 @@ def _live_demo():
     return demo_run()
 
 
-def render_live_incident():
-    """The real thing: a live incident driven by system.py, not scripted."""
-    st.markdown("### 🔴 Live System · Real Autonomous Incident")
-    st.markdown("---")
-    st.caption(
-        "Numbers below are computed live by `aegis.system` — a real trained "
-        "champion, an Evidently/River detector on a streamed window, a retrained "
-        "challenger, the label-free CBPE gate, MLflow registry, and a SQLite "
-        "audit trail. Nothing here is hardcoded."
-    )
-    try:
-        d = _live_demo()
-    except Exception as exc:
-        st.info(f"Live system unavailable ({exc}).")
-        return
-
+def _render_incident_view(d):
+    """Render a single incident payload (live or a fixed preset)."""
     gate = d["gate"]
     passed = gate.get("passed")
     healthy_acc = d["champion_healthy_acc"]
@@ -517,6 +581,38 @@ def render_live_incident():
     return d
 
 
+def render_live_incident():
+    """The real thing: a live incident driven by system.py, not scripted."""
+    st.markdown("### 🔴 Live System · Real Autonomous Incident")
+    st.markdown("---")
+    st.caption(
+        "Numbers below are computed live by `aegis.system` — a real trained "
+        "champion, an Evidently/River detector on a streamed window, a retrained "
+        "challenger, the label-free CBPE gate, MLflow registry, and a SQLite "
+        "audit trail. Nothing here is hardcoded."
+    )
+    try:
+        d = _live_demo()
+    except Exception as exc:
+        st.info(f"Live system unavailable ({exc}).")
+        return None
+    _render_incident_view(d)
+    return d
+
+
+def render_analysis(d):
+    """Render a fixed, saved monitoring analysis (deterministic everywhere)."""
+    st.markdown(f"### 📊 {d['title']}")
+    st.markdown("---")
+    st.caption(
+        f"Saved analysis for **{d['model']}** · {d['drift_type']} drift. These "
+        "figures are fixed — identical after a reset and on every machine."
+    )
+    _render_incident_view(d)
+    st.markdown("---")
+    render_scoreboard(data=d)
+
+
 def run_demo():
     """Run the demo on real numbers from the live system."""
     d = _live_demo()  # real before/after from aegis.system
@@ -546,44 +642,60 @@ def reset_demo():
     st.rerun()
 
 
+VIEW_LIVE = "🔴 Live System (real)"
+VIEW_A1 = "📊 Analysis · Model Monitoring 1"
+VIEW_A2 = "📊 Analysis · Model Monitoring 2"
+
+
 def main():
     """Main Streamlit app"""
     render_header()
-    
-    # Demo controls
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        if not st.session_state.demo_running:
-            if st.button("▶️ Run Demo", type="primary", use_container_width=True):
-                run_demo()
-        else:
-            if st.button("🔄 Reset Demo", use_container_width=True):
-                reset_demo()
-    
-    st.markdown("---")
-    
-    # Two-panel layout
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        render_incumbent_panel()
-    
-    with col_right:
-        render_aegis_panel()
-    
-    # Live system - a real autonomous incident driven by aegis.system
-    st.markdown("---")
-    live = render_live_incident()
 
-    # Real measured scoreboard from the live run
+    # View selector: the live system, or a fixed saved analysis.
+    view = st.radio(
+        "Select a view",
+        [VIEW_LIVE, VIEW_A1, VIEW_A2],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
     st.markdown("---")
-    render_scoreboard(data=live)
 
-    # Live hero technique - real CBPE estimate vs withheld truth
-    st.markdown("---")
-    render_hero_technique()
-    
+    if view == VIEW_A1:
+        render_analysis(ANALYSIS_1)
+    elif view == VIEW_A2:
+        render_analysis(ANALYSIS_2)
+    else:
+        # Demo controls
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if not st.session_state.demo_running:
+                if st.button("▶️ Run Demo", type="primary", use_container_width=True):
+                    run_demo()
+            else:
+                if st.button("🔄 Reset Demo", use_container_width=True):
+                    reset_demo()
+
+        st.markdown("---")
+
+        # Two-panel layout
+        col_left, col_right = st.columns(2)
+        with col_left:
+            render_incumbent_panel()
+        with col_right:
+            render_aegis_panel()
+
+        # Live system - a real autonomous incident driven by aegis.system
+        st.markdown("---")
+        live = render_live_incident()
+
+        # Real measured scoreboard from the live run
+        st.markdown("---")
+        render_scoreboard(data=live)
+
+        # Live hero technique - real CBPE estimate vs withheld truth
+        st.markdown("---")
+        render_hero_technique()
+
     # Footer
     st.markdown("---")
     st.markdown("""
